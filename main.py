@@ -51,6 +51,7 @@ async def health_check():
     Health check endpoint to verify service status and dependencies.
     """
     google_sheets_connected = False
+    google_sheets_error = None
     openai_configured = bool(settings.openai_api_key)
     
     try:
@@ -58,11 +59,22 @@ async def health_check():
         sheets_service = GoogleSheetsService()
         google_sheets_connected = True
     except Exception as e:
-        pass
+        google_sheets_error = str(e)
+    
+    # Create health status message
+    if google_sheets_connected:
+        status = "healthy"
+        message = "Service is running"
+    else:
+        status = "degraded"
+        if google_sheets_error:
+            message = f"Google Sheets not connected: {google_sheets_error}"
+        else:
+            message = "Google Sheets connection failed"
     
     return HealthResponse(
-        status="healthy" if google_sheets_connected else "degraded",
-        message="Service is running",
+        status=status,
+        message=message,
         google_sheets_connected=google_sheets_connected,
         openai_configured=openai_configured
     )

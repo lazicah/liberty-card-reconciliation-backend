@@ -2,8 +2,11 @@
 Configuration module for the Liberty Card Reconciliation API.
 """
 import os
+import json
+import base64
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
+from pathlib import Path
 
 load_dotenv()
 
@@ -15,8 +18,10 @@ class Settings(BaseSettings):
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     ai_model: str = "gpt-4"
     
-    # Google Sheets Configuration
-    service_account_file: str = os.getenv("SERVICE_ACCOUNT_FILE", "streamlit-analytics-488117-db0b145f8c2a.json")
+    # Google Credentials Configuration
+    google_credentials_base64: str = os.getenv("GOOGLE_CREDENTIALS_BASE64", "")
+    google_credentials_json: str = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
+    service_account_file: str = os.getenv("SERVICE_ACCOUNT_FILE", "")
     spreadsheet_id: str = os.getenv("SPREADSHEET_ID", "1La0dpzzo2yZQTOe3DJk11uapbgF4kk2fqQ6fblck8TI")
     
     # Google Sheets Tab Names
@@ -50,6 +55,50 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
+    
+    def get_google_credentials(self) -> dict:
+        """
+        Load Google credentials from environment variables.
+        
+        Priority order:
+        1. GOOGLE_CREDENTIALS_BASE64 (Base64 encoded JSON)
+        2. GOOGLE_CREDENTIALS_JSON (Raw JSON string)
+        3. SERVICE_ACCOUNT_FILE (File path)
+        
+        Returns:
+            Dictionary containing service account credentials
+            
+        Raises:
+            RuntimeError: If no valid credentials found
+        """
+        # Try Base64 encoded credentials
+        if self.google_credentials_base64:
+            try:
+                credentials_json = base64.b64decode(self.google_credentials_base64).decode('utf-8')
+                return json.loads(credentials_json)
+            except Exception as e:
+                raise RuntimeError(f"Failed to decode GOOGLE_CREDENTIALS_BASE64: {e}")
+        
+        # Try JSON string credentials
+        if self.google_credentials_json:
+            try:
+                return json.loads(self.google_credentials_json)
+            except Exception as e:
+                raise RuntimeError(f"Failed to parse GOOGLE_CREDENTIALS_JSON: {e}")
+        
+        # Try file-based credentials (for local development)
+        if self.service_account_file and Path(self.service_account_file).exists():
+            try:
+                with open(self.service_account_file) as f:
+                    return json.load(f)
+            except Exception as e:
+                raise RuntimeError(f"Failed to load {self.service_account_file}: {e}")
+        
+        # No credentials found
+        raise RuntimeError(
+            "No Google credentials found. Set one of: "
+            "GOOGLE_CREDENTIALS_BASE64, GOOGLE_CREDENTIALS_JSON, or SERVICE_ACCOUNT_FILE"
+        )
 
 
 settings = Settings()

@@ -11,13 +11,25 @@ class GoogleSheetsService:
     """Service for interacting with Google Sheets."""
     
     def __init__(self):
-        """Initialize Google Sheets connection."""
-        self.creds = Credentials.from_service_account_file(
-            settings.service_account_file,
-            scopes=settings.google_scopes
-        )
-        self.gc = gspread.authorize(self.creds)
-        self.workbook = self.gc.open_by_key(settings.spreadsheet_id)
+        """Initialize Google Sheets connection from environment credentials."""
+        try:
+            # Get credentials from environment variables
+            credentials_dict = settings.get_google_credentials()
+            
+            # Create credentials object
+            self.creds = Credentials.from_service_account_info(
+                credentials_dict,
+                scopes=settings.google_scopes
+            )
+            
+            # Authorize and open workbook
+            self.gc = gspread.authorize(self.creds)
+            self.workbook = self.gc.open_by_key(settings.spreadsheet_id)
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to initialize Google Sheets connection: {e}. "
+                f"Ensure GOOGLE_CREDENTIALS_BASE64, GOOGLE_CREDENTIALS_JSON, or SERVICE_ACCOUNT_FILE is set."
+            )
     
     def load_sheet_as_df(self, sheet_name: str) -> pd.DataFrame:
         """Load a sheet as a pandas DataFrame."""

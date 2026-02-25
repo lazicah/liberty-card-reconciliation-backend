@@ -48,3 +48,5 @@ outputs/
 # OS
 .DS_Store
 Thumbs.db
+.env.example
+WEB_INTERFACE_PROMPT.md
