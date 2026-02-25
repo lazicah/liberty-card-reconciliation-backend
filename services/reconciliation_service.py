@@ -73,13 +73,13 @@ class ReconciliationService:
         ).dt.date
         self.nibss_unity_settlement_df['Local_Date_Time'] = pd.to_datetime(
             self.nibss_unity_settlement_df['Local_Date_Time'], errors='coerce'
-        ).dt.date
+        )
         self.unity_settlement['Local_Date_Time'] = pd.to_datetime(
             self.unity_settlement['Local_Date_Time'], errors='coerce'
-        ).dt.date
+        )
         self.parallex_nibss['Local_Date_Time'] = pd.to_datetime(
             self.parallex_nibss['Local_Date_Time'], errors='coerce'
-        ).dt.date
+        )
         
         # Filter by run date
         self.card_df = self.card_df[self.card_df['date_created'] == self.run_date]
@@ -176,7 +176,7 @@ class ReconciliationService:
         """Process settlement reports."""
         # Unity NIBSS Settlement
         nibss_unity_sett = self.nibss_unity_settlement_df[
-            self.nibss_unity_settlement_df['Local_Date_Time'] == self.run_date
+            self.nibss_unity_settlement_df['Local_Date_Time'].dt.date == self.run_date
         ]
         nibss_unity_sett = nibss_unity_sett[
             nibss_unity_sett['Merchant_ID'] == settings.merchant_id_nibss_unity
@@ -209,7 +209,7 @@ class ReconciliationService:
         
         # Unity Interswitch Settlement
         unity_isw = self.unity_settlement[
-            self.unity_settlement['Local_Date_Time'] == self.run_date
+            self.unity_settlement['Local_Date_Time'].dt.date == self.run_date
         ].drop_duplicates()
         
         self.results['unity_isw_agg'] = unity_isw.agg({
@@ -243,7 +243,7 @@ class ReconciliationService:
         
         # Parallex NIBSS Settlement
         parallex_df = self.parallex_nibss[
-            self.parallex_nibss['Local_Date_Time'] == self.run_date
+            self.parallex_nibss['Local_Date_Time'].dt.date == self.run_date
         ]
         parallex_df = parallex_df[
             parallex_df['Merchant_ID'] == settings.merchant_id_nibss_parallex
@@ -331,6 +331,15 @@ class ReconciliationService:
         ]]
         
         # Filter by unique date
+        if self.unity_isw.empty or self.unity_isw['Local_Date_Time'].isna().all():
+            self.results['isw_b_charge_back'] = pd.DataFrame()
+            self.results['nerf_nibss_b_credit'] = pd.DataFrame()
+            self.results['being_nibss_summary'] = pd.DataFrame()
+            self.results['cb'] = pd.DataFrame()
+            self.results['tof_df'] = pd.DataFrame()
+            self.results['ds'] = pd.DataFrame()
+            return
+
         unique_date = self.unity_isw['Local_Date_Time'].dt.date.iloc[0]
         isw_b_charge_back = isw_b_charge_back[
             isw_b_charge_back['t_date'].dt.date == unique_date
