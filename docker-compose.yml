@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  api:
+    build: .
+    container_name: liberty-card-reconciliation-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./outputs:/app/outputs
+      - ./.env:/app/.env
+      - ./streamlit-analytics-488117-db0b145f8c2a.json:/app/streamlit-analytics-488117-db0b145f8c2a.json
+    environment:
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+    restart: unless-stopped
