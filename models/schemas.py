@@ -46,6 +46,7 @@ class ReconciliationResponse(BaseModel):
     metrics: MetricsResponse
     ai_summary: Optional[str] = None
     metrics_file_path: str
+    debug: Optional[Dict[str, Any]] = None
 
 
 class HealthResponse(BaseModel):

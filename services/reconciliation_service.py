@@ -29,6 +29,13 @@ class ReconciliationService:
         self.run_date = run_date
         
         # Copy datasets
+        self.raw_card_df = sheets_data['card_df']
+        self.raw_nibss_unity_settlement_df = sheets_data['nibss_unity_settlement_df']
+        self.raw_unity_settlement = sheets_data['unity_settlement']
+        self.raw_parallex_nibss = sheets_data['parallex_nibss']
+        self.raw_collection_account_unity = sheets_data['collection_account_unity']
+        self.raw_collection_account_parallex = sheets_data['collection_account_parallex']
+
         self.card_df = sheets_data['card_df'].copy()
         self.nibss_unity_settlement_df = sheets_data['nibss_unity_settlement_df'].copy()
         self.unity_settlement = sheets_data['unity_settlement'].copy()
@@ -64,6 +71,25 @@ class ReconciliationService:
             'metrics': self.metrics,
             'datasets': self.results
         }
+
+    def _normalize_merchant_id_value(self, value) -> str:
+        """Normalize merchant IDs for consistent comparisons."""
+        text = str(value).strip()
+        return text[:-2] if text.endswith(".0") else text
+
+    def _normalize_merchant_id_series(self, series: pd.Series) -> pd.Series:
+        """Normalize merchant ID series to string without trailing .0."""
+        return (
+            series.astype(str)
+            .str.strip()
+            .str.replace(r"\.0$", "", regex=True)
+        )
+
+    def _coerce_numeric_columns(self, df: pd.DataFrame, columns: list) -> None:
+        """Coerce known numeric columns to numeric types."""
+        for col in columns:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
     
     def _prepare_data(self):
         """Prepare and convert date columns."""
@@ -80,6 +106,47 @@ class ReconciliationService:
         self.parallex_nibss['Local_Date_Time'] = pd.to_datetime(
             self.parallex_nibss['Local_Date_Time'], errors='coerce'
         )
+
+        # Normalize identifiers and numeric fields
+        self.merchant_id_interswitch_unity = self._normalize_merchant_id_value(
+            settings.merchant_id_interswitch_unity
+        )
+        self.merchant_id_nibss_unity = self._normalize_merchant_id_value(
+            settings.merchant_id_nibss_unity
+        )
+        self.merchant_id_nibss_parallex = self._normalize_merchant_id_value(
+            settings.merchant_id_nibss_parallex
+        )
+
+        self.card_df['merchant_id'] = self._normalize_merchant_id_series(
+            self.card_df['merchant_id']
+        )
+        self.nibss_unity_settlement_df['Merchant_ID'] = self._normalize_merchant_id_series(
+            self.nibss_unity_settlement_df['Merchant_ID']
+        )
+        self.unity_settlement['Merchant_ID'] = self._normalize_merchant_id_series(
+            self.unity_settlement['Merchant_ID']
+        )
+        self.parallex_nibss['Merchant_ID'] = self._normalize_merchant_id_series(
+            self.parallex_nibss['Merchant_ID']
+        )
+
+        if 'host_resp_code' in self.card_df.columns:
+            self.card_df['host_resp_code'] = pd.to_numeric(
+                self.card_df['host_resp_code'], errors='coerce'
+            )
+
+        self._coerce_numeric_columns(self.card_df, [
+            'amount', 'liberty_commission', 'final_liberty_rev',
+            'ro_profit', 'liberty_profit'
+        ])
+        self._coerce_numeric_columns(self.nibss_unity_settlement_df, [
+            'Tran_Amount_Req', 'Merchant_Receivable', 'Merchant_Discount'
+        ])
+        self._coerce_numeric_columns(self.unity_settlement, ['Tran_Amount_Req'])
+        self._coerce_numeric_columns(self.parallex_nibss, [
+            'Tran_Amount_Req', 'Merchant_Receivable', 'Merchant_Discount'
+        ])
         
         # Filter by run date
         self.card_df = self.card_df[self.card_df['date_created'] == self.run_date]
@@ -88,6 +155,7 @@ class ReconciliationService:
         """Process card transactions and separate by type."""
         # Filter successful transactions
         cashout_trans = self.card_df[self.card_df['host_resp_code'] == 0]
+        self.cashout_trans = cashout_trans
         
         # PAYBOX transactions
         paybox_trans = cashout_trans[cashout_trans['type_of_user'] == 'MERCHANT']
@@ -102,13 +170,13 @@ class ReconciliationService:
         
         # Separate by merchant ID
         self.interswitch_unity = cashout_trans[
-            cashout_trans['merchant_id'] == settings.merchant_id_interswitch_unity
+            cashout_trans['merchant_id'] == self.merchant_id_interswitch_unity
         ]
         self.nibss_unity = cashout_trans[
-            cashout_trans['merchant_id'] == settings.merchant_id_nibss_unity
+            cashout_trans['merchant_id'] == self.merchant_id_nibss_unity
         ]
         self.nibss_parallex = cashout_trans[
-            cashout_trans['merchant_id'] == settings.merchant_id_nibss_parallex
+            cashout_trans['merchant_id'] == self.merchant_id_nibss_parallex
         ]
         
         # Process Interswitch Unity
@@ -179,7 +247,7 @@ class ReconciliationService:
             self.nibss_unity_settlement_df['Local_Date_Time'].dt.date == self.run_date
         ]
         nibss_unity_sett = nibss_unity_sett[
-            nibss_unity_sett['Merchant_ID'] == settings.merchant_id_nibss_unity
+            nibss_unity_sett['Merchant_ID'] == self.merchant_id_nibss_unity
         ]
         nibss_unity_sett = nibss_unity_sett.drop_duplicates()
         
@@ -246,7 +314,7 @@ class ReconciliationService:
             self.parallex_nibss['Local_Date_Time'].dt.date == self.run_date
         ]
         parallex_df = parallex_df[
-            parallex_df['Merchant_ID'] == settings.merchant_id_nibss_parallex
+            parallex_df['Merchant_ID'] == self.merchant_id_nibss_parallex
         ].drop_duplicates()
         
         self.results['parallex_nibss_df'] = parallex_df.agg({
@@ -470,6 +538,66 @@ class ReconciliationService:
         
         # Try MMDDYYYY
         return pd.to_datetime(x, format="%m%d%Y", errors="coerce")
+
+    def get_debug_info(self) -> Dict:
+        """Return debug info to validate filters and date alignment."""
+        def summarize_dates(df: pd.DataFrame, column: str) -> Dict:
+            if column not in df.columns:
+                return {"column": column, "rows": len(df), "min": None, "max": None}
+            series = pd.to_datetime(df[column], errors="coerce")
+            series = series.dropna()
+            if series.empty:
+                return {"column": column, "rows": len(df), "min": None, "max": None}
+            return {
+                "column": column,
+                "rows": len(df),
+                "min": series.min().date().isoformat(),
+                "max": series.max().date().isoformat()
+            }
+
+        def count_for_date(df: pd.DataFrame, column: str) -> int:
+            if column not in df.columns:
+                return 0
+            dates = pd.to_datetime(df[column], errors="coerce").dt.date
+            return int((dates == self.run_date).sum())
+
+        debug = {
+            "run_date": self.run_date.isoformat(),
+            "rows": {
+                "card_df": len(self.raw_card_df),
+                "nibss_unity_settlement_df": len(self.raw_nibss_unity_settlement_df),
+                "unity_settlement": len(self.raw_unity_settlement),
+                "parallex_nibss": len(self.raw_parallex_nibss),
+                "collection_account_unity": len(self.raw_collection_account_unity),
+                "collection_account_parallex": len(self.raw_collection_account_parallex)
+            },
+            "dates": {
+                "card_df": summarize_dates(self.raw_card_df, "date_created"),
+                "nibss_unity_settlement_df": summarize_dates(self.raw_nibss_unity_settlement_df, "Local_Date_Time"),
+                "unity_settlement": summarize_dates(self.raw_unity_settlement, "Local_Date_Time"),
+                "parallex_nibss": summarize_dates(self.raw_parallex_nibss, "Local_Date_Time")
+            },
+            "run_date_counts": {
+                "card_df": count_for_date(self.raw_card_df, "date_created"),
+                "nibss_unity_settlement_df": count_for_date(self.raw_nibss_unity_settlement_df, "Local_Date_Time"),
+                "unity_settlement": count_for_date(self.raw_unity_settlement, "Local_Date_Time"),
+                "parallex_nibss": count_for_date(self.raw_parallex_nibss, "Local_Date_Time")
+            },
+            "card_filters": {
+                "card_df_filtered": len(self.card_df),
+                "cashout_trans": len(getattr(self, "cashout_trans", pd.DataFrame())),
+                "interswitch_unity": len(getattr(self, "interswitch_unity", pd.DataFrame())),
+                "nibss_unity": len(getattr(self, "nibss_unity", pd.DataFrame())),
+                "nibss_parallex": len(getattr(self, "nibss_parallex", pd.DataFrame()))
+            },
+            "merchant_ids": {
+                "interswitch_unity": self.merchant_id_interswitch_unity,
+                "nibss_unity": self.merchant_id_nibss_unity,
+                "nibss_parallex": self.merchant_id_nibss_parallex
+            }
+        }
+
+        return debug
     
     def _generate_metrics(self):
         """Generate comprehensive metrics."""

@@ -81,7 +81,11 @@ async def health_check():
 
 
 @app.post("/reconciliation/run", response_model=ReconciliationResponse, tags=["Reconciliation"])
-async def run_reconciliation(request: ReconciliationRequest, background_tasks: BackgroundTasks):
+async def run_reconciliation(
+    request: ReconciliationRequest,
+    background_tasks: BackgroundTasks,
+    debug: bool = False
+):
     """
     Run the complete reconciliation process.
     
@@ -146,7 +150,8 @@ async def run_reconciliation(request: ReconciliationRequest, background_tasks: B
             run_date=str(run_date),
             metrics=MetricsResponse(**results['metrics']),
             ai_summary=ai_summary,
-            metrics_file_path=metrics_path
+            metrics_file_path=metrics_path,
+            debug=recon_service.get_debug_info() if debug else None
         )
         
     except Exception as e:

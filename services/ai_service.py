@@ -2,7 +2,7 @@
 AI service for generating summaries using OpenAI.
 """
 import json
-import openai
+from openai import OpenAI
 from typing import Dict
 from config import settings
 
@@ -12,7 +12,7 @@ class AIService:
     
     def __init__(self):
         """Initialize AI service."""
-        openai.api_key = settings.openai_api_key
+        self.client = OpenAI(api_key=settings.openai_api_key)
         self.model = settings.ai_model
     
     def generate_summary(self, metrics: Dict) -> str:
@@ -39,7 +39,7 @@ Metrics:
 """
         
         try:
-            response = openai.chat.completions.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=500
