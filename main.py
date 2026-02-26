@@ -104,10 +104,18 @@ async def run_reconciliation(
     Returns:
         ReconciliationResponse with metrics and AI summary
     """
+    recon_service = None
     try:
         # Determine run date
         if request.run_date:
-            run_date = datetime.strptime(request.run_date, "%Y-%m-%d").date()
+            parts = request.run_date.split("-")
+            if len(parts) != 3:
+                raise ValueError("run_date must be in YYYY-MM-DD format")
+            year, month, day = parts
+            if not (year.isdigit() and month.isdigit() and day.isdigit()):
+                raise ValueError("run_date must be numeric in YYYY-MM-DD format")
+            normalized_run_date = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+            run_date = datetime.strptime(normalized_run_date, "%Y-%m-%d").date()
         else:
             run_date = (datetime.today() - timedelta(days=request.days_offset)).date()
         
@@ -154,8 +162,19 @@ async def run_reconciliation(
             debug=recon_service.get_debug_info() if debug else None
         )
         
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Reconciliation failed: {str(e)}")
+        if debug and recon_service is not None:
+            import traceback
+            detail = {
+                "message": f"Reconciliation failed: {str(e)}",
+                "traceback": traceback.format_exc(),
+                "debug": recon_service.get_debug_info()
+            }
+        else:
+            detail = f"Reconciliation failed: {str(e)}"
+        raise HTTPException(status_code=500, detail=detail)
 
 
 @app.get("/metrics/{run_date}", response_model=MetricsResponse, tags=["Metrics"])

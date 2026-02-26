@@ -435,10 +435,10 @@ class ReconciliationService:
         # Extract dates from transaction narration
         collection_unity = self.collection_account_unity.copy()
         narration_series = self._safe_str_series(collection_unity['Transaction Narration'])
+        raw_date_series = narration_series.str.split('#').str.get(-3)
+        raw_date_series = self._safe_str_series(raw_date_series)
         collection_unity['raw_date'] = (
-            narration_series
-            .str.split('#')
-            .str[-3]
+            raw_date_series
             .str.strip()
             .str.replace(r"\s+", "", regex=True)
             .str.replace(r"\D", "", regex=True)
@@ -572,6 +572,19 @@ class ReconciliationService:
             dates = pd.to_datetime(df[column], errors="coerce").dt.date
             return int((dates == self.run_date).sum())
 
+        def summarize_non_string(df: pd.DataFrame, column: str) -> Dict:
+            if column not in df.columns:
+                return {"column": column, "rows": len(df), "non_string_count": 0, "type_counts": {}}
+            series = df[column]
+            non_string = series[~series.apply(lambda x: isinstance(x, str) or pd.isna(x))]
+            type_counts = non_string.apply(lambda x: type(x).__name__).value_counts().to_dict()
+            return {
+                "column": column,
+                "rows": len(df),
+                "non_string_count": int(non_string.shape[0]),
+                "type_counts": type_counts
+            }
+
         debug = {
             "run_date": self.run_date.isoformat(),
             "rows": {
@@ -605,6 +618,14 @@ class ReconciliationService:
                 "interswitch_unity": self.merchant_id_interswitch_unity,
                 "nibss_unity": self.merchant_id_nibss_unity,
                 "nibss_parallex": self.merchant_id_nibss_parallex
+            },
+            "data_quality": {
+                "collection_account_unity": summarize_non_string(
+                    self.raw_collection_account_unity, "Transaction Narration"
+                ),
+                "collection_account_parallex": summarize_non_string(
+                    self.raw_collection_account_parallex, "Transaction Narration"
+                )
             }
         }
 
