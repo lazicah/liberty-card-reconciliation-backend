@@ -79,11 +79,13 @@ class ReconciliationService:
 
     def _normalize_merchant_id_series(self, series: pd.Series) -> pd.Series:
         """Normalize merchant ID series to string without trailing .0."""
-        return (
-            series.astype(str)
-            .str.strip()
-            .str.replace(r"\.0$", "", regex=True)
-        )
+        safe_series = self._safe_str_series(series)
+        return safe_series.str.strip().str.replace(r"\.0$", "", regex=True)
+
+    def _safe_str_series(self, series: pd.Series) -> pd.Series:
+        """Return a string-typed series safe for .str operations."""
+        safe = series.where(series.notna(), "")
+        return safe.astype(str)
 
     def _coerce_numeric_columns(self, df: pd.DataFrame, columns: list) -> None:
         """Coerce known numeric columns to numeric types."""
@@ -147,6 +149,15 @@ class ReconciliationService:
         self._coerce_numeric_columns(self.parallex_nibss, [
             'Tran_Amount_Req', 'Merchant_Receivable', 'Merchant_Discount'
         ])
+
+        if 'Transaction Narration' in self.collection_account_unity.columns:
+            self.collection_account_unity['Transaction Narration'] = self._safe_str_series(
+                self.collection_account_unity['Transaction Narration']
+            )
+        if 'Transaction Narration' in self.collection_account_parallex.columns:
+            self.collection_account_parallex['Transaction Narration'] = self._safe_str_series(
+                self.collection_account_parallex['Transaction Narration']
+            )
         
         # Filter by run date
         self.card_df = self.card_df[self.card_df['date_created'] == self.run_date]
@@ -347,20 +358,19 @@ class ReconciliationService:
     def _process_bank_statements(self):
         """Process bank statements."""
         # Unity Interswitch Account
-        isw_collection = self.collection_account_unity[
+        narration_series = self._safe_str_series(
             self.collection_account_unity['Transaction Narration']
-            .str.upper()
-            .str.startswith('2LBP')
+        )
+        isw_collection = self.collection_account_unity[
+            narration_series.str.upper().str.startswith('2LBP')
         ]
         
         # Fix narration
-        fixed_narration = (
-            isw_collection['Transaction Narration']
-            .str.replace(
-                r'(\d{9,12})\s+(\d{2}\s+\d{2}\s+\d{4}-)',
-                r'\1 - \2',
-                regex=True
-            )
+        isw_narration = self._safe_str_series(isw_collection['Transaction Narration'])
+        fixed_narration = isw_narration.str.replace(
+            r'(\d{9,12})\s+(\d{2}\s+\d{2}\s+\d{4}-)',
+            r'\1 - \2',
+            regex=True
         )
         
         isw_collection[['tid', 'stans', 'pan', 'rrn', 't_date', 'narration']] = (
@@ -424,9 +434,9 @@ class ReconciliationService:
         """Process NIBSS Unity bank statement."""
         # Extract dates from transaction narration
         collection_unity = self.collection_account_unity.copy()
+        narration_series = self._safe_str_series(collection_unity['Transaction Narration'])
         collection_unity['raw_date'] = (
-            collection_unity['Transaction Narration']
-            .astype(str)
+            narration_series
             .str.split('#')
             .str[-3]
             .str.strip()
@@ -439,7 +449,7 @@ class ReconciliationService:
         
         # NERF NIBSS transactions
         nerf_nibss = collection_unity[
-            collection_unity['Transaction Narration'].str.strip().str.endswith('NEFT', na=False)
+            narration_series.str.strip().str.endswith('NEFT', na=False)
         ].reset_index()
         
         grouped_nerf = nerf_nibss.groupby(['new_date'])['Credit'].sum().reset_index()
@@ -448,7 +458,7 @@ class ReconciliationService:
         
         # BEING NIBSS transactions
         being_nibss = collection_unity[
-            collection_unity['Transaction Narration'].str.strip().str.startswith('BEING', na=False)
+            narration_series.str.strip().str.startswith('BEING', na=False)
         ].reset_index()
         
         being_nibss_summary = being_nibss.drop(columns=['raw_date', 'new_date'])
@@ -466,13 +476,16 @@ class ReconciliationService:
     def _process_additional_bank_items(self, unique_date):
         """Process charge backs, terminal owner fees, and daily sweeps."""
         # Charge backs
+        narration_series = self._safe_str_series(
+            self.collection_account_unity['Transaction Narration']
+        )
         cb = self.collection_account_unity[
-            self.collection_account_unity['Transaction Narration'].str.startswith('RVSL', na=False)
+            narration_series.str.startswith('RVSL', na=False)
         ]
         
+        cb_narration = self._safe_str_series(cb['Transaction Narration'])
         cb['raw_date'] = (
-            cb['Transaction Narration']
-            .astype(str)
+            cb_narration
             .str.split('-')
             .str[-2]
             .str[-11:]
@@ -489,17 +502,15 @@ class ReconciliationService:
         
         # Terminal owner fee
         isw_collection = self.collection_account_unity[
-            self.collection_account_unity['Transaction Narration']
-            .str.upper()
-            .str.startswith('2LBP')
+            narration_series.str.upper().str.startswith('2LBP')
         ]
         
         being_nibss = self.collection_account_unity[
-            self.collection_account_unity['Transaction Narration'].str.strip().str.startswith('BEING', na=False)
+            narration_series.str.strip().str.startswith('BEING', na=False)
         ]
         
         tof_df = self.collection_account_unity[
-            self.collection_account_unity['Transaction Narration'].str.endswith('TRANSACTION', na=False)
+            narration_series.str.endswith('TRANSACTION', na=False)
         ]
         
         exclude_narrations = pd.concat([
@@ -514,7 +525,7 @@ class ReconciliationService:
         self.results['tof_df'] = tof_df
         
         # Daily sweep
-        ds = tof_df[tof_df['Transaction Narration'].str.startswith('DAILY', na=False)]
+        ds = tof_df[self._safe_str_series(tof_df['Transaction Narration']).str.startswith('DAILY', na=False)]
         self.results['ds'] = ds
     
     def _parse_mixed_date(self, x):
